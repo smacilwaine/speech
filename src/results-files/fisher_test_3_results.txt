@@ -1,0 +1,18 @@
+
+Statistics for Real File
+------------------------
+Commas:992 65.82614465826144
+Periods:383 25.414731254147313
+Question Marks:132 8.75912408759124
+
+Statistics for Predicted File
+------------------------
+Commas:1826 55.89225589225589
+Periods:383 11.72329354147536
+Question Marks:1058 32.38445056626875
+
+FEEDBACK FOR MODEL
+------------------------
+Precision: 0.15348574198238954
+Recall: 2.2300469483568075
+F-Measure: 0.2872042929483788

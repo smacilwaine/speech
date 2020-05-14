@@ -1,0 +1,440 @@
+diff --git a/scrapers/make-corpus.sh b/scrapers/make-corpus.sh
+old mode 100644
+new mode 100755
+diff --git a/segmenter/create-trainingset.sh b/segmenter/create-trainingset.sh
+old mode 100644
+new mode 100755
+index 666ce25..b44746f
+--- a/segmenter/create-trainingset.sh
++++ b/segmenter/create-trainingset.sh
+@@ -1,2 +1,2 @@
+ rm -rf data && mkdir data
+-find training-files/*.txt | xargs python3 maketokens.py
++python3 maketokens.py training-files/fisher_train.txt
+diff --git a/segmenter/model.py b/segmenter/model.py
+index be32364..0627509 100644
+--- a/segmenter/model.py
++++ b/segmenter/model.py
+@@ -14,18 +14,24 @@ import pickle
+ 
+ tokens = pickle.load(open('wordlist.pickle', 'rb'))
+ 
+-tokens = tokens + ["``", "''", ","  ,"--", ".", "!", "?", ":", "CC", "CD", "DT", "EX", "FW", "IN", "JJ", "JJR",
++tokens = tokens + ["``", "''", "?"  ,"--", ".", ",", "?", ":", "CC", "CD", "DT", "EX", "FW", "IN", "JJ", "JJR",
+ "JJS", "LS", "MD", "NN", "NNP", "NNPS", "NNS", "PDT", "POS", "PRP", "PRP$", "RB", "RBR", "RBS", "RP", "SYM",
+ "TO", "UH", "VB", "VBD", "VBG", "VBN", "VBP", "VBZ", "WDT", "WP", "WP$", "WRB", "(", ")"]
+ 
+-output_tokens = [",", "--", ".", "!", "?", ":", "OTHER"]
++output_tokens = [",", ".", "--", "!", "?", ":", "OTHER"]
++# reduce to just commas, periods, question marks, and exclamation marks
+ 
+ token_indices = dict((c,i) for i,c in enumerate(tokens))
+ indices_tokens = dict((i,c) for i,c in enumerate(tokens))
+ 
+ output_token_indices = dict((c,i) for i,c in enumerate(output_tokens))
+ 
+-IGNORED_TOKEN = output_token_indices["OTHER"]
++
++# Contributor: Samantha MacIlwaine
++# Copyright 2020
++# Contact: srm2197@columbia.edu
++# IGNORE_TOKENS and END_TOKENS lines rewritten by me
++IGNORED_TOKENS = set([output_token_indices["OTHER"], output_token_indices[":"], output_token_indices["!"], output_token_indices["--"]])
+ END_TOKENS = set([output_token_indices["."], output_token_indices["!"], output_token_indices["?"]])  # tokens that end a sentence
+ 
+ 
+@@ -41,7 +47,8 @@ def map_output_index(ix):
+     else:
+         return output_token_indices['OTHER']
+ 
+-def build_model(activation='softmax', loss='categorical_crossentropy', learning_rate=0.001):
++def build_model(activation='softmax', loss='categorical_crossentropy', learning_rate=0.003):
++    print("Building new model")
+     """Build new model and return the model object"""
+     m = Sequential()
+     m.add(LSTM(64, input_shape=(MAX_LENGTH*2, len(tokens))))  # MAX_LENGTH tokens forward, MAX_LENGTH backward
+@@ -49,6 +56,7 @@ def build_model(activation='softmax', loss='categorical_crossentropy', learning_
+     m.add(Activation(activation))
+     optimizer = RMSprop(lr=learning_rate)
+     m.compile(loss=loss, optimizer=optimizer)
++    print("Done building new model.")
+     return m
+ 
+ def load_sample_indices(input_path):
+@@ -81,7 +89,7 @@ def make_samples(sample_indices, step_size=1):
+         y_sample = None
+         while j < len(sample_indices) and len(x_sample) < MAX_LENGTH:
+             # forward tokens
+-            if map_output_index(sample_indices[j]) == IGNORED_TOKEN:
++            if map_output_index(sample_indices[j]) in IGNORED_TOKENS:
+                 # ignore punctuation characters
+                 x_sample.append(sample_indices[j])
+             j = j + 1
+@@ -91,7 +99,7 @@ def make_samples(sample_indices, step_size=1):
+             continue
+         while j < len(sample_indices) and len(x_sample) < MAX_LENGTH*2:
+             # backward tokens
+-            if map_output_index(sample_indices[j]) == IGNORED_TOKEN:
++            if map_output_index(sample_indices[j]) == IGNORED_TOKENS:
+                 # ignore punctuation characters
+                 x_sample.append(sample_indices[j])
+             j = j + 1
+@@ -127,8 +135,9 @@ try:
+     model = load_model('model.h5')
+ except:
+     traceback.print_exc(file=sys.stdout)
+-    print('Could not open model file. Creating new model.')
++    print('No existing model. Creating new model.')
+     model = build_model()
++    print("Build model received.")
+ 
+ command = sys.argv[1]
+ 
+@@ -136,13 +145,18 @@ if command != 'train' and command != 'predict':
+     sys.exit('Command should be "train" or "predict"')
+ 
+ if command == 'train':
++    print("Beginning the training process.")
+     indices = []
+     for fpath in sys.argv[2:]:
++        print("Loading sample indices...")
+         f_indices = load_sample_indices(fpath)
+         indices = indices + f_indices
++    print("Sample indices loaded.")
+     X, Y = make_samples(indices)
++    print("Sample indices made.")
+     if len(X) == 0 or len(Y) == 0:
+         sys.exit('No data')
++    print("Starting iterations.")
+     for iteration in range(1,100):
+         print()
+         print('-'*10)
+@@ -150,6 +164,7 @@ if command == 'train':
+         model.fit(X, Y, batch_size=128, nb_epoch=1, validation_split=0.1)
+         model.save('model.h5')
+ else:
++    print("Starting prediction process in model.py.")
+     words = get_words(sys.argv[2])
+     preds = 0
+     indices = [token_indices[token] for token in maketokens(sys.argv[2]) if token in token_indices]
+@@ -162,7 +177,12 @@ else:
+         for j, ix in enumerate(sample):
+             x[0, j, ix] = 1
+         pred = np.argmax(model.predict(x, verbose=0)[0])
+-        if pred != IGNORED_TOKEN:
++
++        # Contributor: Samantha MacIlwaine
++        # Copyright 2020
++        # Contact: srm2197@columbia.edu
++        # IGNORE_TOKENS and END_TOKENS logic chunks below rewritten by me
++        if pred in IGNORED_TOKENS:
+             words = apply_prediction(words, i+preds, pred)
+             preds = preds + 1
+         if pred in END_TOKENS:
+@@ -170,4 +190,13 @@ else:
+             i += MAX_LENGTH
+         else:
+             i += 1
+-    print(' '.join(words))
+\ No newline at end of file
++
++    # I also rewrote output pipeline
++    input_file = sys.argv[2]
++    base=os.path.basename(path)
++    output_file = open('prediction-files/'+base+'.pred.txt'+'w')
++    output_file.write((' ').join(words))
++    output_file.close()
++    print("Done. Check prediction.txt for prediction.")
++
++
+diff --git a/segmenter/test.txt b/segmenter/test.txt
+deleted file mode 100644
+index 5a85002..0000000
+--- a/segmenter/test.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-Mr. Speaker Mr. President Members of the Congress It is with a heavy heart that I stand before you my friends and colleagues in the Congress of the United States Only yesterday we laid to rest the mortal remains of our beloved President Franklin Delano Roosevelt At a time like this words are inadequate The most eloquent tribute would be a reverent silence yet in this decisive hour when world events are moving so rapidly our silence might be misunderstood and might give comfort to our enemies.
+\ No newline at end of file
+diff --git a/segmenter/top_n_corpus.sh b/segmenter/top_n_corpus.sh
+old mode 100644
+new mode 100755
+index 1b3ebfb..1376fb1
+--- a/segmenter/top_n_corpus.sh
++++ b/segmenter/top_n_corpus.sh
+@@ -1,2 +1,2 @@
+ rm -rf data && mkdir data
+-find training-files/*.txt | xargs python3 top_n_words.py
++python3 segmenter/top_n_words.py segmenter/training-files/fisher_train.txt
+diff --git a/segmenter/top_n_words.py b/segmenter/top_n_words.py
+index a142ffb..1c96cb9 100644
+--- a/segmenter/top_n_words.py
++++ b/segmenter/top_n_words.py
+@@ -8,9 +8,9 @@ import pickle
+ 
+ common_words = {}
+ 
+-tokens = ["``", "''", ","  ,"--", ".", "!", "?", ":", "CC", "CD", "DT", "EX", "FW", "IN", "JJ", "JJR",
++tokens = [".", "?", ",", "CC", "CD", "DT", "EX", "FW", "IN", "JJ", "JJR",
+ "JJS", "LS", "MD", "NN", "NNP", "NNPS", "NNS", "PDT", "POS", "PRP", "PRP$", "RB", "RBR", "RBS", "RP", "SYM",
+-"TO", "UH", "VB", "VBD", "VBG", "VBN", "VBP", "VBZ", "WDT", "WP", "WP$", "WRB", "(", ")"]
++"TO", "UH", "VB", "VBD", "VBG", "VBN", "VBP", "VBZ", "WDT", "WP", "WP$", "WRB"]
+ 
+ token_set = set(tokens)
+ MAX_WORDS = 3000
+@@ -42,6 +42,6 @@ if __name__ == "__main__":
+ 	sorted_words = [word.lower() for word, _ in sorted_words if (word not in tokens and not is_numeric(word))]
+ 	sorted_words = sorted_words[:MAX_WORDS]
+ 	#sorted_words = sorted_words + tokens
+-	print(sorted_words)
++	#print(sorted_words)
+ 	pickle.dump(sorted_words, open('wordlist.pickle', 'wb'))
+ 	
+diff --git a/segmenter/train.sh b/segmenter/train.sh
+old mode 100644
+new mode 100755
+index 3657d57..8367d14
+--- a/segmenter/train.sh
++++ b/segmenter/train.sh
+@@ -1 +1 @@
+-find data/*.txt | xargs python3 model.py train
++find data/fisher_train_en.txt | xargs python3 model.py train
+diff --git a/src/fix_spacing.py b/src/fix_spacing.py
+index 7194774..e1b23bb 100644
+--- a/src/fix_spacing.py
++++ b/src/fix_spacing.py
+@@ -14,7 +14,13 @@ class FixSpacing(object):
+ 		
+ 	def _fix_spacing(self, paragraph):
+ 		"""Fix spacing in paragraph"""
+-		paragraph = paragraph.replace(" 's", "'s")
++		paragraph = paragraph.replace(".", " .")
+ 		paragraph = paragraph.replace(" , ", ", ")
+ 		paragraph = paragraph.replace(" . ", ". ")
++		paragraph = paragraph.replace(" : ", ": ")
++		paragraph = paragraph.replace(" ? ", "? ")
++		paragraph = paragraph.replace(" ; ", "; ")
++		paragraph = paragraph.replace(" ; ", "; ")
++		paragraph = paragraph.replace("( ", "(")
++		paragraph = paragraph.replace(" )", ")")
+ 		return paragraph
+\ No newline at end of file
+diff --git a/src/options.json b/src/options.json
+index 1397fe8..227506f 100644
+--- a/src/options.json
++++ b/src/options.json
+@@ -1,12 +1,18 @@
+ {
+ 	"title": "Transcription",
+ 	"audio_file": "obama_speech.wav",
++	"text_file": [
++		"./prepared-testing-files/fisher_test_0.txt",
++		"./prepared-testing-files/fisher_test_1.txt",
++		"./prepared-testing-files/fisher_test_2.txt",
++		"./prepared-testing-files/fisher_test_3.txt"
++	],
+ 	"output": "output.docx",
+ 	"punctuate_model": "../models/model.3000dictsize.h5",
+ 	"paragraph_splitter_model": "../models/paragraph.splitter.pickle",
+-	"wordlist": "../models/wordlist.3000.pickle",
++	"wordlist": "../segmenter/wordlist.pickle",
+ 	"watson_model": "en-US",
+-	"watson_credentials": "../credentials.json",
++	"watson_credentials": "credentials.json",
+ 	"start": 0,
+-	"finish": 60
++	"finish": 15
+ }
+\ No newline at end of file
+diff --git a/src/punctuate.py b/src/punctuate.py
+index 9d8f956..980e8be 100644
+--- a/src/punctuate.py
++++ b/src/punctuate.py
+@@ -8,7 +8,6 @@ import codecs
+ import numpy as np
+ import logging
+ 
+-
+ MAX_LENGTH= 10  # maximum length of token memory used for training (+- this number of words)
+ 
+ class Punctuate(object):
+@@ -35,16 +34,26 @@ class Punctuate(object):
+ 			"JJS", "LS", "MD", "NN", "NNP", "NNPS", "NNS", "PDT", "POS", "PRP", "PRP$", "RB", "RBR", "RBS", "RP", "SYM",
+ 			"TO", "UH", "VB", "VBD", "VBG", "VBN", "VBP", "VBZ", "WDT", "WP", "WP$", "WRB", "(", ")"]
+ 		#self._wordlist = set(self._wordlist)
++
+ 		self._output_tokens = [",", "--", ".", "!", "?", ":", "OTHER"]
+ 
++		# reduce to just commas, periods, and points
++
+ 		self._token_indices = dict((c,i) for i,c in enumerate(self._wordlist))
+ 		self._indices_tokens = dict((i,c) for i,c in enumerate(self._wordlist))
+ 
+ 		self._output_token_indices = dict((c,i) for i,c in enumerate(self._output_tokens))
+ 
+-		self._IGNORED_TOKEN = self._output_token_indices["OTHER"]
+-		self._END_TOKENS = set([self._output_token_indices["."], self._output_token_indices["!"], self._output_token_indices["?"]])  # tokens that end a sentence
++	 	# Contributor: Samantha MacIlwaine
++	    # Copyright 2020
++	    # Contact: srm2197@columbia.edu
++	    # IGNORE_TOKENS and END_TOKENS rewritten by me to improve model
++		self._IGNORED_TOKENS = set([self._output_token_indices["OTHER"], self._output_token_indices[":"], 
++		self._output_token_indices["!"], self._output_token_indices["--"]])
++
++		self._END_TOKENS = set([self._output_token_indices["."], self._output_token_indices["?"]])  # tokens that end a sentence
+ 		self._output_indices_tokens = dict((i,c) for i,c in enumerate(self._output_tokens))
++
+ 		self._options.update(kwargs)
+ 
+ 	def _tokenize(self, text):
+@@ -79,7 +88,7 @@ class Punctuate(object):
+ 		"""Returns sample with prediction applied"""
+ 		real_ix = MAX_LENGTH + ix
+ 		char = ''
+-		if pred != self._IGNORED_TOKEN:
++		if pred not in self._IGNORED_TOKENS:
+ 			char = self._output_tokens[pred]
+ 		return words[:real_ix] + [char] + words[real_ix:]
+ 		
+@@ -96,7 +105,13 @@ class Punctuate(object):
+ 			for j, ix in enumerate(sample):
+ 				x[0, j, ix] = 1
+ 			pred = np.argmax(self._model.predict(x, verbose=0)[0])
+-			if pred != self._IGNORED_TOKEN:
++
++
++	        # Contributor: Samantha MacIlwaine
++	        # Copyright 2020
++	        # Contact: srm2197@columbia.edu
++	        # IGNORE_TOKENS and END_TOKENS logic chunks below rewritten by me
++			if pred not in self._IGNORED_TOKENS:
+ 				words = self._apply_prediction(words, i+preds, pred)
+ 				preds = preds + 1
+ 			if pred in self._END_TOKENS:
+@@ -105,6 +120,10 @@ class Punctuate(object):
+ 			else:
+ 				i += 1
+ 		output = ' '.join(words)
+-		if output[-1] != '.':
+-			output += '.'
++		# The following two lines were deleted by me, to significantly improve model.
++		#if output[-1:] != '.':
++		#	output += '.'
++		new_file = open('result_of_punctuate_py.txt', 'w')
++		new_file.write(output)
++		new_file.close()
+ 		return output
+\ No newline at end of file
+diff --git a/src/run.py b/src/run.py
+index 19222d5..b4c3b01 100644
+--- a/src/run.py
++++ b/src/run.py
+@@ -6,25 +6,70 @@ from capitalize import Capitalize
+ from fix_spacing import FixSpacing
+ from split_paragraphs import SplitParagraphs
+ from transcription import new_transcription, read_options
+-import sys
++import sys, os
+ import logging
+ 
+-logging.basicConfig(format='%(asctime)s %(message)s')
++# Contributor: Samantha MacIlwaine
++# Copyright 2020
++# Contact: srm2197@columbia.edu
+ 
+-if len(sys.argv) < 2:
+-	print("Usage python3 run.py /path/to/options/file")
+-	sys.exit(1)
++def test(test_file):
++	logging.basicConfig(format='%(asctime)s %(message)s')
+ 
+-options = read_options(sys.argv[1])
+-transcription = new_transcription(options['audio_file'], title=options['title'])
+-toWav = ToWav(**options)
+-toText = ToText(options['watson_credentials'], **options)
+-toDocx = ToDocX(**options)
+-punc = Punctuate(options['punctuate_model'], options['wordlist'], **options)
+-caps = Capitalize()
+-space = FixSpacing()
+-splitParas = SplitParagraphs(options['paragraph_splitter_model'], **options)
++	if len(sys.argv) < 2:
++		print("Usage python3 run.py /path/to/options/file")
++		sys.exit(1)
+ 
+-toDocx(splitParas(space(caps(punc(toText(toWav(transcription)))))))
++	options = read_options(sys.argv[1])
++	input_file_base = open(test_file, 'r')
++	input_file = input_file_base.read().splitlines()
++	transcription = {}
++	paragraphs = {}
+ 
+-logging.info('Done!')
++	i = 0
++	while i < len(input_file):
++		chunk = {}
++		chunk['content'] = str(input_file[i])
++		paragraphs[i] = chunk
++		i += 1
++	transcription['paragraphs'] = paragraphs
++
++	# need: transcription[i][content] = line for that text
++
++	#transcription = new_transcription(options['audio_file'], title=options['title'])
++	#toWav = ToWav(**options)
++	#toText = ToText(options['watson_credentials'], **options)
++	#oDocx = ToDocX(**options)
++	punc = Punctuate(options['punctuate_model'], options['wordlist'], **options)
++	caps = Capitalize()
++	space = FixSpacing()
++	splitParas = SplitParagraphs(options['paragraph_splitter_model'], **options)
++
++	#toDocx(splitParas(space(caps(punc(toText(toWav(transcription)))))))
++	base=os.path.basename(test_file)
++	output_file = open('prediction-files/'+base+'.pred.txt', 'w')
++
++	final_trans = punc(transcription)
++	print(len(final_trans))
++	output_text = ''
++	for i in range(len(final_trans['paragraphs'])):
++		output_text += final_trans['paragraphs'][i]['content']+'\n'
++	if len(output_text) > 0:
++		output_file.write(output_text)
++		#print(output_text)
++	else:
++		print("It didn't work.")
++
++
++	logging.info('Done! Check output.txt')
++	print('Added 1 prediction file to prediction-files.')
++	output_file.close()
++	input_file_base.close()
++
++def main():
++	options = read_options(sys.argv[1])
++	for test_file in options['text_file']:
++		test(test_file)
++
++if __name__ == "__main__":
++	main()
+diff --git a/src/split_paragraphs.py b/src/split_paragraphs.py
+index 980d53c..164e173 100644
+--- a/src/split_paragraphs.py
++++ b/src/split_paragraphs.py
+@@ -68,11 +68,13 @@ class SplitParagraphs(object):
+     	new_t = copy.deepcopy(transcription)
+     	new_t['paragraphs'] = []
+     	for para in transcription['paragraphs']:
+-    		new_p = self._segment_text(self._model, [para['content']], max_splits=self._options['max_paragraphs'])
+-    		for p in new_p:
+-    			pc = copy.deepcopy(para)  # so we get other attributes, like the speaker, that this class may not be aware of
+-    			pc['content'] = p
+-    			new_t['paragraphs'].append(pc)		
++            print(para['content'])
++            print(self._options['max_paragraphs'])
++            new_p = self._segment_text(self._model, [para['content']], max_splits=self._options['max_paragraphs'])
++            for p in new_p:
++                pc = copy.deepcopy(para)  # so we get other attributes, like the speaker, that this class may not be aware of
++                pc['content'] = p
++                new_t['paragraphs'].append(pc)		
+     	return new_t
+     
+     def _segment_text(self, model, paras, max_splits=4):

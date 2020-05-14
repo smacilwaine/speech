@@ -1,0 +1,18 @@
+{
+	"title": "Transcription",
+	"audio_file": "obama_speech.wav",
+	"text_file": [
+		"./prepared-testing-files/fisher_test_0.txt",
+		"./prepared-testing-files/fisher_test_1.txt",
+		"./prepared-testing-files/fisher_test_2.txt",
+		"./prepared-testing-files/fisher_test_3.txt"
+	],
+	"output": "output.docx",
+	"punctuate_model": "../models/model.3000dictsize.h5",
+	"paragraph_splitter_model": "../models/paragraph.splitter.pickle",
+	"wordlist": "../segmenter/wordlist.pickle",
+	"watson_model": "en-US",
+	"watson_credentials": "credentials.json",
+	"start": 0,
+	"finish": 15
+}
